@@ -30,9 +30,8 @@ def home():
 @app.post("/chat")
 async def chat(req: ChatRequest):
 
-    # TEMPORARY dummy response
-    # later we'll connect actual root_agent execution
-    response = f"Agent received: {req.message}"
+    result = await root_agent.run(req.message)
+    response = result.text
 
     return {
         "response": response
