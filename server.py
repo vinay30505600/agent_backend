@@ -26,13 +26,26 @@ def home():
         "status": "running"
     }
 
-# Chat endpoint
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai.types import Content, Part
+import uuid
+
+session_service = InMemorySessionService()
+runner = Runner(agent=root_agent, app_name="devops_agent", session_service=session_service)
+
 @app.post("/chat")
 async def chat(req: ChatRequest):
+    session_id = str(uuid.uuid4())
+    await session_service.create_session(app_name="devops_agent", user_id="user", session_id=session_id)
 
-    result = await root_agent.run(req.message)
-    response = result.text
+    message = Content(role="user", parts=[Part(text=req.message)])
+    response_text = ""
 
-    return {
-        "response": response
-    }
+    async for event in runner.run_async(user_id="user", session_id=session_id, new_message=message):
+        if event.is_final_response() and event.content:
+            for part in event.content.parts:
+                if part.text:
+                    response_text += part.text
+
+    return {"response": response_text}
