@@ -53,6 +53,9 @@ codecicdagent = LlmAgent(
     McpToolset(
       connection_params=StreamableHTTPConnectionParams(
         url='https://gitlab.com/api/mcp/v1',
+        headers={
+          "Authorization": f"Bearer{GITLAB_TOKEN}"
+        }
       ),
     )
   ],
