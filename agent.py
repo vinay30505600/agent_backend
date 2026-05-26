@@ -13,6 +13,7 @@ DYNATRACE_API_TOKEN = os.getenv("DYNATRACE_API_TOKEN")
 ELASTIC_API_KEY = os.getenv("ELASTIC_API_KEY")
 ARIZE_API_KEY = os.getenv("ARIZE_API_KEY")
 MONGODB_API_KEY = os.getenv("MONGODB_API_KEY")
+GITLAB_TOKEN=os.getenv("GITLAB_TOKEN")
 
 
 code_cicd_agent_google_search_agent = LlmAgent(
