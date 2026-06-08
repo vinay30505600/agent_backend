@@ -146,7 +146,7 @@ databaseagent = LlmAgent(
   
     McpToolset(
       connection_params=StreamableHTTPConnectionParams(
-        url=f'https://mcp.mongodb.com/v1?api_key={MONGODB_API_KEY}',
+        url=f'https://mcp.mongodb.com/v1?connectionString={MONGODB_API_KEY}',
       ),
     )
     
