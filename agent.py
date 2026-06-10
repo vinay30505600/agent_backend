@@ -18,24 +18,7 @@ ELASTIC_API_KEY = os.getenv("ELASTIC_API_KEY")
 ARIZE_API_KEY = os.getenv("ARIZE_API_KEY")
 MONGODB_API_KEY = os.getenv("MONGODB_API_KEY")
 GITLAB_TOKEN=os.getenv("GITLAB_TOKEN")
-import subprocess
-import sys
 
-def ensure_mongodb_mcp():
-    try:
-        result = subprocess.run(
-            ["npx", "mongodb-mcp-server", "--version"],
-            capture_output=True, timeout=15
-        )
-        if result.returncode != 0:
-            raise Exception("not found")
-    except Exception:
-        subprocess.run(
-            ["npm", "install", "-g", "mongodb-mcp-server"],
-            check=True
-        )
-
-ensure_mongodb_mcp()
 
 
 code_cicd_agent_google_search_agent = LlmAgent(
@@ -169,13 +152,12 @@ databaseagent = LlmAgent(
     McpToolset(
   connection_params=StdioConnectionParams(
     server_params=StdioServerParameters(
-      command="npx",
-      args=["-y", "mongodb-mcp-server"],
+      command="node",
+      args=["/opt/render/project/src/node_modules/.bin/mongodb-mcp-server"],
       env={
         "MDB_MCP_CONNECTION_STRING": os.getenv("MDB_MCP_CONNECTION_STRING"),
-        # Uncomment below if you also want Atlas management tools:
-        # "MDB_MCP_API_CLIENT_ID": os.getenv("MDB_MCP_API_CLIENT_ID"),
-        # "MDB_MCP_API_CLIENT_SECRET": os.getenv("MDB_MCP_API_CLIENT_SECRET"),
+        "MDB_MCP_API_CLIENT_ID": os.getenv("MDB_MCP_API_CLIENT_ID"),
+        "MDB_MCP_API_CLIENT_SECRET": os.getenv("MDB_MCP_API_CLIENT_SECRET"),
       },
     ),
     timeout=30,
