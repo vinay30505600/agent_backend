@@ -9,8 +9,6 @@ from google.adk.tools.google_search_tool import GoogleSearchTool
 from google.adk.tools import url_context
 import os
 from dotenv import load_dotenv
-DT_EVENTS_URL = f"https://wkf10640.live.dynatrace.com/api/v2/events?api-token={DYNATRACE_API_TOKEN}"
-DT_PROBLEMS_URL = f"https://wkf10640.live.dynatrace.com/api/v2/problems?api-token={DYNATRACE_API_TOKEN}"
 
 
 load_dotenv()
@@ -20,6 +18,9 @@ ELASTIC_API_KEY = os.getenv("ELASTIC_API_KEY")
 ARIZE_API_KEY = os.getenv("ARIZE_API_KEY")
 MONGODB_API_KEY = os.getenv("MONGODB_API_KEY")
 GITLAB_TOKEN=os.getenv("GITLAB_TOKEN")
+DT_EVENTS_URL = f"https://wkf10640.live.dynatrace.com/api/v2/events?api-token={DYNATRACE_API_TOKEN}"
+DT_PROBLEMS_URL = f"https://wkf10640.live.dynatrace.com/api/v2/problems?api-token={DYNATRACE_API_TOKEN}"
+
 
 
 
