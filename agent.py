@@ -129,7 +129,7 @@ You are an expert Observability and Monitoring Specialist...
     ),
     timeout=30,
   ),
-)
+),
     McpToolset(
       connection_params=StreamableHTTPConnectionParams(
         url=f'https://mcp.elastic.co/v1?api_key={ELASTIC_API_KEY}'
