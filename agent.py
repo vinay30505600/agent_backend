@@ -60,7 +60,7 @@ codecicdagent = LlmAgent(
       connection_params=StreamableHTTPConnectionParams(
         url='https://gitlab.com/api/mcp/v1',
         headers={
-          "Authorization": f"Bearer{GITLAB_TOKEN}"
+          "Authorization": f"Bearer {GITLAB_TOKEN}"
         }
       ),
     )
@@ -102,10 +102,12 @@ observabilityagent = LlmAgent(
     agent_tool.AgentTool(agent=observability_agent_google_search_agent),
     agent_tool.AgentTool(agent=observability_agent_url_context_agent),
     McpToolset(
-      connection_params=StreamableHTTPConnectionParams(
-        url=f'https://wkf10640.live.dynatrace.com/api/mcp?api-token={DYNATRACE_API_TOKEN}',
-      ),
-    ),
+  connection_params=StreamableHTTPConnectionParams(
+    url=f'https://wkf10640.live.dynatrace.com/api/mcp?api-token={DYNATRACE_API_TOKEN}',
+    timeout=30,
+    sse_read_timeout=60,
+  ),
+),
     McpToolset(
       connection_params=StreamableHTTPConnectionParams(
         url=f'https://mcp.elastic.co/v1?api_key={ELASTIC_API_KEY}'
