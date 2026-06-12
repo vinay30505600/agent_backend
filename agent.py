@@ -1,4 +1,3 @@
-
 from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
 from mcp import StdioServerParameters
 from google.adk.agents import LlmAgent
@@ -7,6 +6,8 @@ from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
 from google.adk.tools import agent_tool
 from google.adk.tools.google_search_tool import GoogleSearchTool
 from google.adk.tools import url_context
+from google.adk.tools import FunctionTool
+import requests
 import os
 from dotenv import load_dotenv
 
@@ -17,37 +18,92 @@ DYNATRACE_API_TOKEN = os.getenv("DYNATRACE_API_TOKEN")
 ELASTIC_API_KEY = os.getenv("ELASTIC_API_KEY")
 ARIZE_API_KEY = os.getenv("ARIZE_API_KEY")
 MONGODB_API_KEY = os.getenv("MONGODB_API_KEY")
-GITLAB_TOKEN=os.getenv("GITLAB_TOKEN")
-DT_EVENTS_URL = f"https://wkf10640.live.dynatrace.com/api/v2/events?api-token={DYNATRACE_API_TOKEN}"
-DT_PROBLEMS_URL = f"https://wkf10640.live.dynatrace.com/api/v2/problems?api-token={DYNATRACE_API_TOKEN}"
+GITLAB_TOKEN = os.getenv("GITLAB_TOKEN")
+
+DT_BASE_URL = "https://wkf10640.live.dynatrace.com"
 
 
+# ─────────────────────────────────────────────
+# Dynatrace Python Tools (reliable, no MCP URL)
+# ─────────────────────────────────────────────
 
+def get_dynatrace_events(limit: int = 10) -> dict:
+    """Fetch recent events from Dynatrace including chaos events like CPU spikes, errors, memory spikes."""
+    try:
+        response = requests.get(
+            f"{DT_BASE_URL}/api/v2/events",
+            headers={"Authorization": f"Api-Token {DYNATRACE_API_TOKEN}"},
+            params={"pageSize": limit},
+            timeout=15
+        )
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_dynatrace_problems(limit: int = 10) -> dict:
+    """Fetch recent problems and incidents from Dynatrace."""
+    try:
+        response = requests.get(
+            f"{DT_BASE_URL}/api/v2/problems",
+            headers={"Authorization": f"Api-Token {DYNATRACE_API_TOKEN}"},
+            params={"pageSize": limit},
+            timeout=15
+        )
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_dynatrace_metrics(metric_selector: str = "builtin:host.cpu.usage") -> dict:
+    """Fetch metrics from Dynatrace. Default fetches CPU usage."""
+    try:
+        response = requests.get(
+            f"{DT_BASE_URL}/api/v2/metrics/query",
+            headers={"Authorization": f"Api-Token {DYNATRACE_API_TOKEN}"},
+            params={"metricSelector": metric_selector, "resolution": "1m"},
+            timeout=15
+        )
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_dynatrace_entities() -> dict:
+    """Fetch all monitored entities/services from Dynatrace."""
+    try:
+        response = requests.get(
+            f"{DT_BASE_URL}/api/v2/entities",
+            headers={"Authorization": f"Api-Token {DYNATRACE_API_TOKEN}"},
+            timeout=15
+        )
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ─────────────────────────────────────────────
+# Code CICD Agent
+# ─────────────────────────────────────────────
 
 code_cicd_agent_google_search_agent = LlmAgent(
   name='Code_CICD_Agent_google_search_agent',
   model='gemini-2.5-flash',
-  description=(
-      'Agent specialized in performing Google searches.'
-  ),
+  description='Agent specialized in performing Google searches.',
   sub_agents=[],
   instruction='Use the GoogleSearchTool to find information on the web.',
-  tools=[
-    GoogleSearchTool()
-  ],
+  tools=[GoogleSearchTool()],
 )
+
 code_cicd_agent_url_context_agent = LlmAgent(
   name='Code_CICD_Agent_url_context_agent',
   model='gemini-2.5-flash',
-  description=(
-      'Agent specialized in fetching content from URLs.'
-  ),
+  description='Agent specialized in fetching content from URLs.',
   sub_agents=[],
   instruction='Use the UrlContextTool to retrieve content from provided URLs.',
-  tools=[
-    url_context
-  ],
+  tools=[url_context],
 )
+
 codecicdagent = LlmAgent(
   name='codecicdagent',
   model='gemini-2.5-flash',
@@ -69,99 +125,160 @@ codecicdagent = LlmAgent(
     )
   ],
 )
+
+
+# ─────────────────────────────────────────────
+# Observability Agent
+# ─────────────────────────────────────────────
+
 observability_agent_google_search_agent = LlmAgent(
   name='Observability_Agent_google_search_agent',
   model='gemini-2.5-flash',
-  description=(
-      'Agent specialized in performing Google searches.'
-  ),
+  description='Agent specialized in performing Google searches.',
   sub_agents=[],
   instruction='Use the GoogleSearchTool to find information on the web.',
-  tools=[
-    GoogleSearchTool()
-  ],
+  tools=[GoogleSearchTool()],
 )
+
 observability_agent_url_context_agent = LlmAgent(
   name='Observability_Agent_url_context_agent',
   model='gemini-2.5-flash',
-  description=(
-      'Agent specialized in fetching content from URLs.'
-  ),
+  description='Agent specialized in fetching content from URLs.',
   sub_agents=[],
   instruction='Use the UrlContextTool to retrieve content from provided URLs.',
-  tools=[
-    url_context
-  ],
+  tools=[url_context],
 )
+
 observabilityagent = LlmAgent(
   name='observabilityagent',
   model='gemini-2.5-flash',
   description=(
-      'Handles log analysis, metrics monitoring, alerts, \ntraces, and infrastructure health using Dynatrace \nand Elastic Search.'
+      'Handles log analysis, metrics monitoring, alerts, '
+      'traces, and infrastructure health using Dynatrace and Elastic Search.'
   ),
   sub_agents=[],
-  instruction=f'''CRITICAL: You have access to url_context tool. 
-Use it to fetch Dynatrace data directly.
+  instruction='''CRITICAL RULES — READ FIRST:
+- You have 4 Dynatrace tools: get_dynatrace_events, get_dynatrace_problems, get_dynatrace_metrics, get_dynatrace_entities
+- ALWAYS call these tools FIRST before answering ANY monitoring question
+- NEVER answer from memory or general knowledge
+- NEVER ask clarifying questions before calling the tools
+- If someone asks about errors → call get_dynatrace_events immediately
+- If someone asks about incidents → call get_dynatrace_problems immediately
+- If someone asks about CPU/memory → call get_dynatrace_metrics immediately
+- If someone asks about services → call get_dynatrace_entities immediately
+- Show the actual data returned from the tools in your response
 
-To check recent events use this URL:
-{DT_EVENTS_URL}
+## IDENTITY
+- Name: Observability-Agent
+- Role: Analyze logs, metrics, alerts and traces to find root cause of issues
+- Tone: Analytical, precise, incident-focused
 
-To check problems use this URL:
-{DT_PROBLEMS_URL}
+## YOUR CAPABILITIES
+- Fetch real-time events via Dynatrace (get_dynatrace_events)
+- Fetch active problems via Dynatrace (get_dynatrace_problems)
+- Fetch metrics like CPU/memory via Dynatrace (get_dynatrace_metrics)
+- Fetch monitored services via Dynatrace (get_dynatrace_entities)
+- Search and analyze logs via Elastic
+- Identify root cause of incidents
+- Correlate events + metrics together
+- Build incident timeline
 
-ALWAYS fetch these URLs when asked about incidents, errors, or monitoring.
-NEVER answer from memory. Always call the URL first then analyze the response.
+## STEP 1 — GATHER DATA
+When you receive any request:
+1. Call get_dynatrace_events to check recent events
+2. Call get_dynatrace_problems to check active incidents
+3. Analyze the returned data
+4. Only then form your response
 
-You are an expert Observability and Monitoring Specialist...
-(rest of your existing instruction)
+## STEP 2 — ANALYZE
+Follow this investigation order:
+1. Check error events first
+2. Check active problems
+3. Check metrics if needed
+4. Correlate all together
+5. Build a timeline of events
+
+## STEP 3 — RESPONSE FORMAT
+
+### 🚨 Incident Summary
+(What happened in 2-3 lines)
+
+### ⏱️ Timeline
+(When did it start, peak, resolve)
+
+### 📊 Root Cause Analysis
+(Exact cause with evidence from Dynatrace data)
+
+### 🔥 Affected Services
+(List of impacted services)
+
+### 🛠️ Recommended Fix
+(Step by step resolution plan)
+
+### 📈 Prevention Plan
+(Alert rules + thresholds to add)
+
+### 🔍 Evidence
+(Exact event or metric values from Dynatrace that prove the root cause)
+
+## LOG PATTERNS YOU RECOGNIZE
+- OOMKilled → Memory limit exceeded
+- CrashLoopBackOff → App crashing on start
+- 5xx errors → Backend service failure
+- High latency spikes → DB or network issue
+- Connection refused → Service not running
+- Disk pressure → Storage full
+- CHAOS ERROR → Intentional error triggered for testing
+- CHAOS CPU → CPU spike triggered for testing
+- CHAOS MEMORY → Memory spike triggered for testing
+- CHAOS DELAY → Latency spike triggered for testing
+
+## STRICT RULES
+- Always call tools before responding
+- Always show actual data from tools as evidence
+- Always include timestamps from the data
+- Never guess root cause without tool data
+- If tools return empty → say "No events found in Dynatrace" and show what was queried
+- Correlate at least 2 data points before confirming root cause
 ''',
   tools=[
     agent_tool.AgentTool(agent=observability_agent_google_search_agent),
     agent_tool.AgentTool(agent=observability_agent_url_context_agent),
-    McpToolset(
-  connection_params=StdioConnectionParams(
-    server_params=StdioServerParameters(
-      command="node",
-      args=["/path/to/node_modules/.bin/dynatrace-mcp"],
-      env={
-        "DT_ENVIRONMENT": "https://wkf10640.live.dynatrace.com",
-        "DT_API_TOKEN": os.getenv("DYNATRACE_API_TOKEN"),
-      },
-    ),
-    timeout=30,
-  ),
-),
+    FunctionTool(func=get_dynatrace_events),
+    FunctionTool(func=get_dynatrace_problems),
+    FunctionTool(func=get_dynatrace_metrics),
+    FunctionTool(func=get_dynatrace_entities),
     McpToolset(
       connection_params=StreamableHTTPConnectionParams(
         url=f'https://mcp.elastic.co/v1?api_key={ELASTIC_API_KEY}'
-    )
+      )
     ),
   ]
 )
+
+
+# ─────────────────────────────────────────────
+# Database Agent
+# ─────────────────────────────────────────────
+
 database_agent_google_search_agent = LlmAgent(
   name='Database_Agent_google_search_agent',
   model='gemini-2.5-flash',
-  description=(
-      'Agent specialized in performing Google searches.'
-  ),
+  description='Agent specialized in performing Google searches.',
   sub_agents=[],
   instruction='Use the GoogleSearchTool to find information on the web.',
-  tools=[
-    GoogleSearchTool()
-  ],
+  tools=[GoogleSearchTool()],
 )
+
 database_agent_url_context_agent = LlmAgent(
   name='Database_Agent_url_context_agent',
   model='gemini-2.5-flash',
-  description=(
-      'Agent specialized in fetching content from URLs.'
-  ),
+  description='Agent specialized in fetching content from URLs.',
   sub_agents=[],
   instruction='Use the UrlContextTool to retrieve content from provided URLs.',
-  tools=[
-    url_context
-  ],
+  tools=[url_context],
 )
+
 databaseagent = LlmAgent(
   name='databaseagent',
   model='gemini-2.5-flash',
@@ -173,49 +290,46 @@ databaseagent = LlmAgent(
   tools=[
     agent_tool.AgentTool(agent=database_agent_google_search_agent),
     agent_tool.AgentTool(agent=database_agent_url_context_agent),
-  
     McpToolset(
-  connection_params=StdioConnectionParams(
-    server_params=StdioServerParameters(
-      command="node",
-      args=["/opt/render/project/src/node_modules/.bin/mongodb-mcp-server"],
-      env={
-        "MDB_MCP_CONNECTION_STRING": os.getenv("MDB_MCP_CONNECTION_STRING"),
-        "MDB_MCP_API_CLIENT_ID": os.getenv("MDB_MCP_API_CLIENT_ID"),
-        "MDB_MCP_API_CLIENT_SECRET": os.getenv("MDB_MCP_API_CLIENT_SECRET"),
-      },
-    ),
-    timeout=30,
-  ),
-)
-    
-  
+      connection_params=StdioConnectionParams(
+        server_params=StdioServerParameters(
+          command="node",
+          args=["/opt/render/project/src/node_modules/.bin/mongodb-mcp-server"],
+          env={
+            "MDB_MCP_CONNECTION_STRING": os.getenv("MDB_MCP_CONNECTION_STRING"),
+            "MDB_MCP_API_CLIENT_ID": os.getenv("MDB_MCP_API_CLIENT_ID"),
+            "MDB_MCP_API_CLIENT_SECRET": os.getenv("MDB_MCP_API_CLIENT_SECRET"),
+          },
+        ),
+        timeout=30,
+      ),
+    )
   ],
 )
+
+
+# ─────────────────────────────────────────────
+# AI Monitoring Agent
+# ─────────────────────────────────────────────
+
 ai_monitoring_agent_google_search_agent = LlmAgent(
   name='AI_Monitoring_Agent_google_search_agent',
   model='gemini-2.5-flash',
-  description=(
-      'Agent specialized in performing Google searches.'
-  ),
+  description='Agent specialized in performing Google searches.',
   sub_agents=[],
   instruction='Use the GoogleSearchTool to find information on the web.',
-  tools=[
-    GoogleSearchTool()
-  ],
+  tools=[GoogleSearchTool()],
 )
+
 ai_monitoring_agent_url_context_agent = LlmAgent(
   name='AI_Monitoring_Agent_url_context_agent',
   model='gemini-2.5-flash',
-  description=(
-      'Agent specialized in fetching content from URLs.'
-  ),
+  description='Agent specialized in fetching content from URLs.',
   sub_agents=[],
   instruction='Use the UrlContextTool to retrieve content from provided URLs.',
-  tools=[
-    url_context
-  ],
+  tools=[url_context],
 )
+
 aimonitoringagent = LlmAgent(
   name='aimonitoringagent',
   model='gemini-2.5-flash',
@@ -223,7 +337,7 @@ aimonitoringagent = LlmAgent(
       'Monitors ML model performance, detects drift, \nanalyzes model accuracy degradation and \nprovides retraining recommendations using Arize.'
   ),
   sub_agents=[],
-  instruction='You are an expert MLOps and AI Observability \nSpecialist powered by Arize MCP.\n\n## IDENTITY\n- Name: AI-Monitoring-Agent\n- Role: Monitor ML model health, detect drift,\n  analyze degradation and recommend fixes\n- Tone: Data-driven, precise, proactive\n\n## YOUR CAPABILITIES\n- Monitor ML model performance via Arize\n- Detect feature drift and data drift\n- Analyze prediction accuracy over time\n- Compare baseline vs current performance\n- Identify training vs serving skew\n- Suggest retraining triggers\n- Debug model inference issues\n- Monitor embedding quality\n\n## STEP 1 — ASSESS MODEL HEALTH\nWhen you receive a request always check:\n- Which model is affected?\n- What metrics are degrading?\n- When did degradation start?\n- What changed recently?\n  → New data distribution?\n  → New model version deployed?\n  → Feature pipeline changes?\n- How severe is the drift?\n\n## STEP 2 — INVESTIGATE\nFollow this order:\n1. Check prediction accuracy trend\n2. Check feature drift scores\n3. Check data quality metrics\n4. Compare baseline vs current period\n5. Check training vs serving skew\n6. Review recent model versions\n\n## STEP 3 — RESPONSE FORMAT\n\n### 🤖 Model Health Dashboard\n(Overall health status: \n✅ Healthy / ⚠️ Degrading / 🚨 Critical)\n\n### 📊 Performance Metrics\n(Key metrics with current vs baseline)\n\n| Metric | Baseline | Current | Change |\n|--------|----------|---------|--------|\n| Accuracy | XX% | XX% | ±XX% |\n| F1 Score | XX% | XX% | ±XX% |\n| Latency | XXms | XXms | ±XXms |\n\n### 📉 Drift Analysis\n(What type of drift detected:\n- Feature Drift\n- Data Drift  \n- Concept Drift\n- Training/Serving Skew)\n\n### 🔍 Root Cause\n(Why is the model degrading)\n\n### 🛠️ Recommended Action\n\n#### Immediate Action\n(What to do right now)\n\n#### Short Term (1-7 days)\n(Monitoring and investigation steps)\n\n#### Long Term\n(Retraining strategy and prevention)\n\n### ⚠️ Risk Assessment\n(Impact of not fixing this:\n- Low / Medium / High / Critical)\n\n## DRIFT TYPES YOU DETECT\n- Feature Drift → Input data distribution changed\n- Label Drift → Target variable distribution changed\n- Concept Drift → Relationship between features changed\n- Data Quality → Missing values or outliers increased\n- Training/Serving Skew → Training data differs from \n  production data\n\n## RETRAINING TRIGGERS YOU RECOMMEND\n- Accuracy drops more than 5%\n- F1 score drops more than 3%\n- Feature drift score exceeds 0.3\n- Data quality score drops below 90%\n- Prediction latency increases 2x\n\n## STRICT RULES\n- Always show baseline vs current comparison\n- Always quantify the drift with numbers\n- Never recommend retraining without evidence\n- Always check data quality before model quality\n- Flag immediately if accuracy drops over 10%\n- Always suggest A/B testing before full rollout\n  of retrained model',
+  instruction='You are an expert MLOps and AI Observability \nSpecialist powered by Arize MCP.\n\n## IDENTITY\n- Name: AI-Monitoring-Agent\n- Role: Monitor ML model health, detect drift,\n  analyze degradation and recommend fixes\n- Tone: Data-driven, precise, proactive\n\n## YOUR CAPABILITIES\n- Monitor ML model performance via Arize\n- Detect feature drift and data drift\n- Analyze prediction accuracy over time\n- Compare baseline vs current performance\n- Identify training vs serving skew\n- Suggest retraining triggers\n- Debug model inference issues\n- Monitor embedding quality\n\n## STEP 1 — ASSESS MODEL HEALTH\nWhen you receive a request always check:\n- Which model is affected?\n- What metrics are degrading?\n- When did degradation start?\n- What changed recently?\n  → New data distribution?\n  → New model version deployed?\n  → Feature pipeline changes?\n- How severe is the drift?\n\n## STEP 2 — INVESTIGATE\nFollow this order:\n1. Check prediction accuracy trend\n2. Check feature drift scores\n3. Check data quality metrics\n4. Compare baseline vs current period\n5. Check training vs serving skew\n6. Review recent model versions\n\n## STEP 3 — RESPONSE FORMAT\n\n### 🤖 Model Health Dashboard\n(Overall health status: \n✅ Healthy / ⚠️ Degrading / 🚨 Critical)\n\n### 📊 Performance Metrics\n(Key metrics with current vs baseline)\n\n| Metric | Baseline | Current | Change |\n|--------|----------|---------|--------|\n| Accuracy | XX% | XX% | ±XX% |\n| F1 Score | XX% | XX% | ±XX% |\n| Latency | XXms | XXms | ±XXms |\n\n### 📉 Drift Analysis\n(What type of drift detected:\n- Feature Drift\n- Data Drift  \n- Concept Drift\n- Training/Serving Skew)\n\n### 🔍 Root Cause\n(Why is the model degrading)\n\n### 🛠️ Recommended Action\n\n#### Immediate Action\n(What to do right now)\n\n#### Short Term (1-7 days)\n(Monitoring and investigation steps)\n\n#### Long Term\n(Retraining strategy and prevention)\n\n### ⚠️ Risk Assessment\n(Impact of not fixing this:\n- Low / Medium / High / Critical)\n\n## DRIFT TYPES YOU DETECT\n- Feature Drift → Input data distribution changed\n- Label Drift → Target variable distribution changed\n- Concept Drift → Relationship between features changed\n- Data Quality → Missing values or outliers increased\n- Training/Serving Skew → Training data differs from production data\n\n## RETRAINING TRIGGERS YOU RECOMMEND\n- Accuracy drops more than 5%\n- F1 score drops more than 3%\n- Feature drift score exceeds 0.3\n- Data quality score drops below 90%\n- Prediction latency increases 2x\n\n## STRICT RULES\n- Always show baseline vs current comparison\n- Always quantify the drift with numbers\n- Never recommend retraining without evidence\n- Always check data quality before model quality\n- Flag immediately if accuracy drops over 10%\n- Always suggest A/B testing before full rollout of retrained model',
   tools=[
     agent_tool.AgentTool(agent=ai_monitoring_agent_google_search_agent),
     agent_tool.AgentTool(agent=ai_monitoring_agent_url_context_agent),
@@ -234,30 +348,30 @@ aimonitoringagent = LlmAgent(
     )
   ],
 )
+
+
+# ─────────────────────────────────────────────
+# Root Agent
+# ─────────────────────────────────────────────
+
 dev_ops_coding_copilot_google_search_agent = LlmAgent(
   name='DevOps_Coding_Copilot_google_search_agent',
   model='gemini-2.5-flash',
-  description=(
-      'Agent specialized in performing Google searches.'
-  ),
+  description='Agent specialized in performing Google searches.',
   sub_agents=[],
   instruction='Use the GoogleSearchTool to find information on the web.',
-  tools=[
-    GoogleSearchTool()
-  ],
+  tools=[GoogleSearchTool()],
 )
+
 dev_ops_coding_copilot_url_context_agent = LlmAgent(
   name='DevOps_Coding_Copilot_url_context_agent',
   model='gemini-2.5-flash',
-  description=(
-      'Agent specialized in fetching content from URLs.'
-  ),
+  description='Agent specialized in fetching content from URLs.',
   sub_agents=[],
   instruction='Use the UrlContextTool to retrieve content from provided URLs.',
-  tools=[
-    url_context
-  ],
+  tools=[url_context],
 )
+
 root_agent = LlmAgent(
   name='DevOps_Coding_Copilot',
   model='gemini-2.5-flash',
