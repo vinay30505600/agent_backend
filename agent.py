@@ -17,7 +17,7 @@ load_dotenv()
 DYNATRACE_API_TOKEN = os.getenv("DYNATRACE_API_TOKEN").strip()
 ELASTIC_API_KEY = os.getenv("ELASTIC_API_KEY").strip()
 ARIZE_API_KEY = os.getenv("ARIZE_API_KEY").strip()
-MONGODB_API_KEY = os.getenv("MONGODB_API_KEY").strip()
+
 GITLAB_TOKEN = os.getenv("GITLAB_TOKEN").strip()
 
 DT_BASE_URL = "https://wkf10640.live.dynatrace.com"
