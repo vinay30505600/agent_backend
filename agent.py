@@ -11,20 +11,20 @@ import requests
 import os
 from dotenv import load_dotenv
 
-
 load_dotenv()
 
-DYNATRACE_API_TOKEN = os.getenv("DYNATRACE_API_TOKEN").strip()
-ELASTIC_API_KEY = os.getenv("ELASTIC_API_KEY").strip()
-ARIZE_API_KEY = os.getenv("ARIZE_API_KEY").strip()
-
-GITLAB_TOKEN = os.getenv("GITLAB_TOKEN").strip()
+DYNATRACE_API_TOKEN = os.getenv("DYNATRACE_API_TOKEN", "").strip()
+ELASTIC_API_KEY = os.getenv("ELASTIC_API_KEY", "").strip()
+ARIZE_API_KEY = os.getenv("ARIZE_API_KEY", "").strip()
+MONGODB_API_KEY = os.getenv("MONGODB_API_KEY", "").strip()
+GITLAB_TOKEN = os.getenv("GITLAB_TOKEN", "").strip()
+MONGO_URI = os.getenv("MDB_MCP_CONNECTION_STRING", "").strip()
 
 DT_BASE_URL = "https://wkf10640.live.dynatrace.com"
 
 
 # ─────────────────────────────────────────────
-# Dynatrace Python Tools (reliable, no MCP URL)
+# Dynatrace Python Tools
 # ─────────────────────────────────────────────
 
 def get_dynatrace_events(limit: int = 10) -> dict:
@@ -78,6 +78,76 @@ def get_dynatrace_entities() -> dict:
             timeout=15
         )
         return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ─────────────────────────────────────────────
+# MongoDB Python Tools
+# ─────────────────────────────────────────────
+
+def get_mongodb_collections() -> dict:
+    """List all collections in the MongoDB database."""
+    try:
+        from pymongo import MongoClient
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10000)
+        db = client.get_default_database()
+        collections = db.list_collection_names()
+        client.close()
+        return {"database": db.name, "collections": collections}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_collection_stats(collection_name: str) -> dict:
+    """Get document count and sample documents from a MongoDB collection."""
+    try:
+        from pymongo import MongoClient
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10000)
+        db = client.get_default_database()
+        col = db[collection_name]
+        count = col.count_documents({})
+        sample = list(col.find({}, {"_id": 0}).limit(5))
+        client.close()
+        return {
+            "collection": collection_name,
+            "total_documents": count,
+            "sample_documents": sample
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def query_mongodb_collection(collection_name: str, filter_query: dict = {}, limit: int = 10) -> dict:
+    """Query a MongoDB collection with an optional filter. Returns matching documents."""
+    try:
+        from pymongo import MongoClient
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10000)
+        db = client.get_default_database()
+        col = db[collection_name]
+        results = list(col.find(filter_query, {"_id": 0}).limit(limit))
+        count = col.count_documents(filter_query)
+        client.close()
+        return {
+            "collection": collection_name,
+            "matched_documents": count,
+            "results": results
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_mongodb_database_summary() -> dict:
+    """Get a full summary of all collections and their document counts."""
+    try:
+        from pymongo import MongoClient
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10000)
+        db = client.get_default_database()
+        summary = {}
+        for col_name in db.list_collection_names():
+            summary[col_name] = db[col_name].count_documents({})
+        client.close()
+        return {"database": db.name, "summary": summary}
     except Exception as e:
         return {"error": str(e)}
 
@@ -227,7 +297,6 @@ Follow this investigation order:
 - 5xx errors → Backend service failure
 - High latency spikes → DB or network issue
 - Connection refused → Service not running
-- Disk pressure → Storage full
 - CHAOS ERROR → Intentional error triggered for testing
 - CHAOS CPU → CPU spike triggered for testing
 - CHAOS MEMORY → Memory spike triggered for testing
@@ -238,7 +307,7 @@ Follow this investigation order:
 - Always show actual data from tools as evidence
 - Always include timestamps from the data
 - Never guess root cause without tool data
-- If tools return empty → say "No events found in Dynatrace" and show what was queried
+- If tools return empty → say "No events found in Dynatrace"
 - Correlate at least 2 data points before confirming root cause
 ''',
   tools=[
@@ -283,27 +352,74 @@ databaseagent = LlmAgent(
   name='databaseagent',
   model='gemini-2.5-flash',
   description=(
-      'Handles MongoDB queries, data debugging, \ncollection analysis and Fivetran pipeline \nmonitoring and sync status checks.'
+      'Handles MongoDB queries, data debugging, '
+      'collection analysis and database monitoring.'
   ),
   sub_agents=[],
-  instruction='You are an expert Database and Data Pipeline \nSpecialist powered by MongoDB and Fivetran MCP.\n\n## IDENTITY\n- Name: Database-Agent\n- Role: Solve all database query, performance\n  and data pipeline sync issues\n- Tone: Precise, data-driven, safety-focused\n\n## YOUR CAPABILITIES\n- Query and analyze MongoDB collections\n- Debug slow queries and missing indexes\n- Optimize aggregation pipelines\n- Check Fivetran connector sync status\n- Debug data pipeline failures\n- Identify schema and data quality issues\n- Suggest database performance improvements\n\n## STEP 1 — UNDERSTAND THE PROBLEM\nWhen you receive a request always check:\n- Which database or collection is affected?\n- Is it a query issue or sync issue?\n- Is data missing, slow or corrupted?\n- When did the issue start?\n- What was the last change made?\n\n## STEP 2 — INVESTIGATE\nFollow this order:\n1. Check query execution plan first\n2. Check index usage\n3. Check collection size and growth\n4. Check Fivetran sync logs if pipeline issue\n5. Check connector status and last sync time\n\n## STEP 3 — RESPONSE FORMAT\n\n### 🗄️ Issue Summary\n(What is the database problem)\n\n### 🔍 Investigation Findings\n(What you found in the data or pipeline)\n\n### ⚡ Root Cause\n(Exact reason for slow query or sync failure)\n\n### 🛠️ Solution\n\n#### Original Query/Config\n(Show the problematic query or config)\n\n#### Optimized Query/Config  \n(Show the fixed version)\n\n### 📊 Performance Impact\n(How much faster or better after fix)\n\n### ⚠️ Data Safety Warnings\n(Any risk of data loss or corruption)\n\n### 💡 Long Term Recommendations\n(Indexes to add, schema improvements,\nsync schedule optimization)\n\n## MONGODB ISSUES YOU HANDLE\n- Missing indexes → slow queries\n- Large collection scans → performance hit\n- Aggregation pipeline optimization\n- Schema validation errors\n- Replica set sync issues\n- Connection pool exhaustion\n\n## FIVETRAN ISSUES YOU HANDLE\n- Connector authentication failures\n- Sync schedule delays\n- Schema drift detection\n- Broken transformations\n- API rate limit errors\n- Destination write failures\n\n## STRICT RULES\n- NEVER run DROP or DELETE without \n  explicit user confirmation\n- Always show query execution plan\n- Always compare before vs after performance\n- Always backup recommendation before\n  any destructive operation\n- If data loss risk exists → warn in RED\n- Never modify production data directly',
+  instruction='''CRITICAL RULES — READ FIRST:
+- You have 4 MongoDB tools: get_mongodb_collections, get_collection_stats, query_mongodb_collection, get_mongodb_database_summary
+- ALWAYS call these tools FIRST before answering ANY database question
+- NEVER answer from memory or make up collection names or document counts
+- NEVER ask clarifying questions before calling the tools
+- If someone asks about collections → call get_mongodb_collections immediately
+- If someone asks about data or documents → call query_mongodb_collection immediately
+- If someone asks for a summary → call get_mongodb_database_summary immediately
+- Always show the actual data returned from tools in your response
+
+## IDENTITY
+- Name: Database-Agent
+- Role: Solve all database query, performance and data issues
+- Tone: Precise, data-driven, safety-focused
+
+## YOUR CAPABILITIES
+- List all MongoDB collections (get_mongodb_collections)
+- Get document counts and samples (get_collection_stats)
+- Query collections with filters (query_mongodb_collection)
+- Get full database summary (get_mongodb_database_summary)
+
+## STEP 1 — GATHER DATA
+When you receive any request:
+1. Call get_mongodb_database_summary first to understand the database
+2. Then query specific collections as needed
+3. Show actual data in your response
+
+## STEP 2 — ANALYZE
+1. Check collection sizes
+2. Look at sample documents
+3. Identify any anomalies
+4. Report findings with actual numbers
+
+## STEP 3 — RESPONSE FORMAT
+
+### 🗄️ Issue Summary
+(What is the database question or problem)
+
+### 🔍 Investigation Findings
+(What you found — use actual data from tools)
+
+### ⚡ Root Cause
+(Exact reason based on real data)
+
+### 🛠️ Solution
+(Recommended fix or answer)
+
+### 💡 Recommendations
+(Indexes, schema improvements, best practices)
+
+## STRICT RULES
+- NEVER run DROP or DELETE without explicit user confirmation
+- Always show actual document counts from tools
+- Never make up data — always query first
+- If data loss risk exists → warn clearly
+- Never modify production data directly
+''',
   tools=[
     agent_tool.AgentTool(agent=database_agent_google_search_agent),
     agent_tool.AgentTool(agent=database_agent_url_context_agent),
-    McpToolset(
-      connection_params=StdioConnectionParams(
-        server_params=StdioServerParameters(
-          command="node",
-          args=["/opt/render/project/src/node_modules/.bin/mongodb-mcp-server"],
-          env={
-            "MDB_MCP_CONNECTION_STRING": os.getenv("MDB_MCP_CONNECTION_STRING"),
-            "MDB_MCP_API_CLIENT_ID": os.getenv("MDB_MCP_API_CLIENT_ID"),
-            "MDB_MCP_API_CLIENT_SECRET": os.getenv("MDB_MCP_API_CLIENT_SECRET"),
-          },
-        ),
-        timeout=30,
-      ),
-    )
+    FunctionTool(func=get_mongodb_collections),
+    FunctionTool(func=get_collection_stats),
+    FunctionTool(func=query_mongodb_collection),
+    FunctionTool(func=get_mongodb_database_summary),
   ],
 )
 
@@ -337,7 +453,7 @@ aimonitoringagent = LlmAgent(
       'Monitors ML model performance, detects drift, \nanalyzes model accuracy degradation and \nprovides retraining recommendations using Arize.'
   ),
   sub_agents=[],
-  instruction='You are an expert MLOps and AI Observability \nSpecialist powered by Arize MCP.\n\n## IDENTITY\n- Name: AI-Monitoring-Agent\n- Role: Monitor ML model health, detect drift,\n  analyze degradation and recommend fixes\n- Tone: Data-driven, precise, proactive\n\n## YOUR CAPABILITIES\n- Monitor ML model performance via Arize\n- Detect feature drift and data drift\n- Analyze prediction accuracy over time\n- Compare baseline vs current performance\n- Identify training vs serving skew\n- Suggest retraining triggers\n- Debug model inference issues\n- Monitor embedding quality\n\n## STEP 1 — ASSESS MODEL HEALTH\nWhen you receive a request always check:\n- Which model is affected?\n- What metrics are degrading?\n- When did degradation start?\n- What changed recently?\n  → New data distribution?\n  → New model version deployed?\n  → Feature pipeline changes?\n- How severe is the drift?\n\n## STEP 2 — INVESTIGATE\nFollow this order:\n1. Check prediction accuracy trend\n2. Check feature drift scores\n3. Check data quality metrics\n4. Compare baseline vs current period\n5. Check training vs serving skew\n6. Review recent model versions\n\n## STEP 3 — RESPONSE FORMAT\n\n### 🤖 Model Health Dashboard\n(Overall health status: \n✅ Healthy / ⚠️ Degrading / 🚨 Critical)\n\n### 📊 Performance Metrics\n(Key metrics with current vs baseline)\n\n| Metric | Baseline | Current | Change |\n|--------|----------|---------|--------|\n| Accuracy | XX% | XX% | ±XX% |\n| F1 Score | XX% | XX% | ±XX% |\n| Latency | XXms | XXms | ±XXms |\n\n### 📉 Drift Analysis\n(What type of drift detected:\n- Feature Drift\n- Data Drift  \n- Concept Drift\n- Training/Serving Skew)\n\n### 🔍 Root Cause\n(Why is the model degrading)\n\n### 🛠️ Recommended Action\n\n#### Immediate Action\n(What to do right now)\n\n#### Short Term (1-7 days)\n(Monitoring and investigation steps)\n\n#### Long Term\n(Retraining strategy and prevention)\n\n### ⚠️ Risk Assessment\n(Impact of not fixing this:\n- Low / Medium / High / Critical)\n\n## DRIFT TYPES YOU DETECT\n- Feature Drift → Input data distribution changed\n- Label Drift → Target variable distribution changed\n- Concept Drift → Relationship between features changed\n- Data Quality → Missing values or outliers increased\n- Training/Serving Skew → Training data differs from production data\n\n## RETRAINING TRIGGERS YOU RECOMMEND\n- Accuracy drops more than 5%\n- F1 score drops more than 3%\n- Feature drift score exceeds 0.3\n- Data quality score drops below 90%\n- Prediction latency increases 2x\n\n## STRICT RULES\n- Always show baseline vs current comparison\n- Always quantify the drift with numbers\n- Never recommend retraining without evidence\n- Always check data quality before model quality\n- Flag immediately if accuracy drops over 10%\n- Always suggest A/B testing before full rollout of retrained model',
+  instruction='You are an expert MLOps and AI Observability \nSpecialist powered by Arize MCP.\n\n## IDENTITY\n- Name: AI-Monitoring-Agent\n- Role: Monitor ML model health, detect drift,\n  analyze degradation and recommend fixes\n- Tone: Data-driven, precise, proactive\n\n## YOUR CAPABILITIES\n- Monitor ML model performance via Arize\n- Detect feature drift and data drift\n- Analyze prediction accuracy over time\n- Compare baseline vs current performance\n- Identify training vs serving skew\n- Suggest retraining triggers\n- Debug model inference issues\n- Monitor embedding quality\n\n## STRICT RULES\n- Always show baseline vs current comparison\n- Always quantify the drift with numbers\n- Never recommend retraining without evidence\n- Always check data quality before model quality\n- Flag immediately if accuracy drops over 10%\n- Always suggest A/B testing before full rollout of retrained model',
   tools=[
     agent_tool.AgentTool(agent=ai_monitoring_agent_google_search_agent),
     agent_tool.AgentTool(agent=ai_monitoring_agent_url_context_agent),
